@@ -1,0 +1,119 @@
+name: release
+
+# Tag push (vX.Y.Z): test, publish, attest, and attach the zip + SHA-256 to a GitHub Release.
+# workflow_dispatch: same build, but the zip is kept as a workflow artifact only (no attestation, no Release) for a dry run.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Third-party actions are pinned to commit SHAs (tags can be moved). The tag is kept in the comment.
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write      # gh release create / upload
+      id-token: write      # build provenance attestation (actions/attest-build-provenance)
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # SDK version comes from global.json so local and CI builds (and packages.lock.json) agree
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # Values from the event go through env, never inline into the script (a tag name may contain quotes).
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Directory.Build.props
+          $version = ($props.Project.PropertyGroup | ForEach-Object { $_.Version } | Where-Object { $_ } | Select-Object -First 1)
+          if (-not $version) { throw 'Directory.Build.props has no <Version>' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag '$env:GITHUB_REF_NAME' does not match <Version> $version in Directory.Build.props"
+          }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
+
+      # WinDivert is a packet-capture driver; Defender on the runner may quarantine it right after download.
+      # Best effort: if the cmdlet is unavailable the build still proceeds.
+      - name: Exclude workspace and temp from Defender
+        shell: pwsh
+        run: |
+          try {
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+            Add-MpPreference -ExclusionPath $env:RUNNER_TEMP
+          } catch {
+            Write-Warning "Add-MpPreference failed: $_"
+          }
+
+      - name: Fetch WinDivert
+        shell: pwsh
+        run: ./scripts/fetch-windivert.ps1
+
+      # locked-mode: fail if the resolved packages differ from the committed packages.lock.json
+      - name: Restore
+        run: dotnet restore NetworkTrafficController.sln --locked-mode
+
+      - name: Build
+        run: dotnet build NetworkTrafficController.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test NetworkTrafficController.sln -c Release --no-build
+
+      - name: Publish
+        shell: pwsh
+        run: ./scripts/publish.ps1 -Output "$env:RUNNER_TEMP/NetworkTrafficController"
+
+      - name: Package
+        id: pkg
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          $zipName = "NetworkTrafficController-$env:VERSION-win-x64.zip"
+          $zip = Join-Path $env:RUNNER_TEMP $zipName
+          # Compress-Archive writes backslash entry names; ZipFile writes portable '/' names with a top-level folder
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $env:RUNNER_TEMP 'NetworkTrafficController'), $zip, 'Optimal', $true)
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sums = Join-Path $env:RUNNER_TEMP 'SHA256SUMS.txt'
+          "$hash  $zipName" | Out-File -FilePath $sums -Encoding ascii
+          Write-Host "$hash  $zipName"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "zip=$zip"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "sums=$sums"
+
+      # Signed statement, stored by GitHub, that this zip was built by this workflow from this commit.
+      # Verify with: gh attestation verify <zip> --repo <owner>/<repo>
+      - name: Attest build provenance
+        if: github.ref_type == 'tag'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.pkg.outputs.zip }}
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: NetworkTrafficController-${{ steps.ver.outputs.version }}-win-x64
+          path: |
+            ${{ steps.pkg.outputs.zip }}
+            ${{ steps.pkg.outputs.sums }}
+
+      # Re-running the job for an existing tag replaces the assets instead of failing on "already exists".
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP: ${{ steps.pkg.outputs.zip }}
+          SUMS: ${{ steps.pkg.outputs.sums }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag exists; replacing assets"
+            gh release upload $tag $env:ZIP $env:SUMS --clobber
+          } else {
+            gh release create $tag --verify-tag --title "NetworkTrafficController $tag" --generate-notes $env:ZIP $env:SUMS
+          }
+          if ($LASTEXITCODE -ne 0) { throw "gh release failed: $LASTEXITCODE" }

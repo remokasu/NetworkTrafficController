@@ -1,0 +1,20 @@
+<Project>
+  <!-- 全プロジェクト共通の設定。CLAUDE.md「C# / .NET 10」の規約をここで強制する -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TargetFramework>net10.0-windows10.0.17763.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Deterministic>true</Deterministic>
+    <!-- NuGet 依存を packages.lock.json で固定する。CI は locked mode（dotnet restore の locked-mode オプション）で復元し、ロックと違う内容が解決されたら失敗させる -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RootNamespace>$(MSBuildProjectName)</RootNamespace>
+    <Company>NetworkTrafficController</Company>
+    <Product>NetworkTrafficController</Product>
+    <Version>0.1.0</Version>
+    <Copyright>Copyright (c) 2026 remokasu</Copyright>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Third-party actions are pinned to commit SHAs (tags can be moved). The tag is kept in the comment.
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # SDK version comes from global.json so local and CI builds (and packages.lock.json) agree
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      # WinDivert is a packet-capture driver; Defender on the runner may quarantine it right after download.
+      # Best effort: if the cmdlet is unavailable the build still proceeds.
+      - name: Exclude workspace from Defender
+        shell: pwsh
+        run: |
+          try {
+            Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE
+          } catch {
+            Write-Warning "Add-MpPreference failed: $_"
+          }
+
+      - name: Fetch WinDivert
+        shell: pwsh
+        run: ./scripts/fetch-windivert.ps1
+
+      # locked-mode: fail if the resolved packages differ from the committed packages.lock.json
+      - name: Restore
+        run: dotnet restore NetworkTrafficController.sln --locked-mode
+
+      - name: Build
+        run: dotnet build NetworkTrafficController.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test NetworkTrafficController.sln -c Release --no-build

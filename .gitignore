@@ -1,0 +1,20 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+TestResults/
+
+# WinDivert binaries (fetched by scripts/fetch-windivert.ps1; not versioned)
+native/WinDivert*.dll
+native/WinDivert*.sys
+native/_download/
+
+# Runtime outputs
+logs/
+*.log
+*.pcap
+
+# scripts/publish.ps1 -Output .\publish
+publish/

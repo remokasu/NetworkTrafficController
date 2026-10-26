@@ -1,0 +1,308 @@
+<Window x:Class="NetworkTrafficController.App.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:NetworkTrafficController.App.ViewModels"
+        d:DataContext="{d:DesignInstance vm:MainViewModel}"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="NetworkTrafficController" Height="760" Width="1200"
+        Icon="/Assets/app.ico"
+        Background="#121212" Foreground="{StaticResource TextBrush}"
+        FontFamily="Segoe UI" FontSize="13" PreviewKeyDown="Window_PreviewKeyDown">
+    <DockPanel>
+        <!-- 上部: 左端=一覧の絞り込み、その右=ステータスと全体の速度（専用の行は作らない）。
+             このバーは右の制御パネルの上まで伸びるので、絞り込み欄は右端ではなく一覧の列の真上（左端）に置き、対象が一覧だと分かるようにする -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" Padding="10,6">
+            <DockPanel LastChildFill="True">
+                <!-- 名前・PID の部分一致で即時に絞る。Ctrl+F でここへ、Esc で消す（キー操作はコードビハインド） -->
+                <Border DockPanel.Dock="Left" Width="220" Height="24" Margin="0,0,14,0"
+                        Background="{StaticResource FieldBrush}" BorderBrush="{StaticResource BorderBrushDark}"
+                        BorderThickness="1" CornerRadius="3"
+                        ToolTip="Filter by process name or PID (Ctrl+F). Esc clears.">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="12" Margin="6,0,4,0"
+                                   VerticalAlignment="Center" Foreground="{StaticResource SubTextBrush}" />
+                        <TextBox Grid.Column="1" x:Name="FilterBox" AutomationProperties.AutomationId="FilterBox"
+                                 Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="FilterBox_PreviewKeyDown"
+                                 Background="Transparent" BorderThickness="0" Padding="0" VerticalContentAlignment="Center"
+                                 Foreground="{StaticResource TextBrush}" CaretBrush="{StaticResource TextBrush}" />
+                        <!-- 空のときだけ見せる案内文（クリックは下の TextBox に通す） -->
+                        <TextBlock Grid.Column="1" Text="Filter processes" Margin="2,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource SubTextBrush}" IsHitTestVisible="False">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=FilterBox}" Value="">
+                                            <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <!-- 文字があるときだけ出る ✕。キーボードフォーカスは取らない -->
+                        <Button Grid.Column="2" AutomationProperties.AutomationId="ClearFilterButton" AutomationProperties.Name="Clear filter" Content="&#xE711;"
+                                FontFamily="Segoe MDL2 Assets" FontSize="10" Command="{Binding ClearFilterCommand}"
+                                Focusable="False" Padding="6,0" BorderThickness="0" Background="Transparent" ToolTip="Clear">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Text, ElementName=FilterBox}" Value="">
+                                            <Setter Property="Visibility" Value="Collapsed" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </Grid>
+                </Border>
+                <!-- 幅が足りないときは「…」で縮める。Run はタグ間の改行が空白として描かれないよう 1 行に並べる -->
+                <TextBlock VerticalAlignment="Center" TextTrimming="CharacterEllipsis"><Run Text="{Binding StatusText, Mode=OneWay}" FontWeight="SemiBold" /><Run Text="   |   " Foreground="#555" /><Run Text="{Binding TotalRateText, Mode=OneWay}" /></TextBlock>
+            </DockPanel>
+        </Border>
+
+        <!-- 下部: 制御サマリ -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}" Padding="10,5">
+            <TextBlock Text="{Binding ControlSummary}" />
+        </Border>
+
+        <!-- 右: 制御パネル（各行 = チェックで ON/OFF、数値、単位。変更は選択中のプロセスに即時反映） -->
+        <Border DockPanel.Dock="Right" Width="340" Background="{StaticResource PanelBrush}" Padding="14,12" DataContext="{Binding Panel}">
+            <Border.Resources>
+                <Style x:Key="ValueBox" TargetType="TextBox">
+                    <Setter Property="Background" Value="{StaticResource FieldBrush}" />
+                    <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+                    <Setter Property="CaretBrush" Value="{StaticResource TextBrush}" />
+                    <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDark}" />
+                    <Setter Property="HorizontalContentAlignment" Value="Right" />
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                    <Setter Property="Padding" Value="4,2" />
+                    <Setter Property="Width" Value="60" />
+                    <Setter Property="Height" Value="26" />
+                    <Setter Property="Margin" Value="0,2" />
+                    <EventSetter Event="KeyDown" Handler="ValueBox_KeyDown" />
+                </Style>
+                <Style x:Key="UnitText" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Margin" Value="6,0,0,0" />
+                    <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />
+                </Style>
+                <Style x:Key="RowCheck" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Margin" Value="0,5" />
+                </Style>
+                <!-- 項目ごとの ↑↓ 方向トグル（SPEC-0002）。他の項目と同じ標準のチェックボックスで、ラベルだけ矢印にする
+                     （矢印の色は一覧・グラフと同じ ↑ OutBrush / ↓ InBrush）。混在（null）は標準の中間表示 -->
+                <Style x:Key="DirToggle" TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Margin" Value="6,0,0,0" />
+                    <Setter Property="FontWeight" Value="Bold" />
+                </Style>
+            </Border.Resources>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <!-- 対象を選んだときだけ「対象: 名前（PID）」を出す。未選択のときは何も出さない -->
+                    <TextBlock AutomationProperties.AutomationId="TargetText" Text="{Binding TargetText}" ToolTip="{Binding TargetToolTip}" TextWrapping="Wrap"
+                               Foreground="{StaticResource SubTextBrush}" Margin="0,0,0,10">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding HasTarget}" Value="False">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+
+                    <Grid IsEnabled="{Binding HasTarget}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Block / Reset / Drop / Delay は、ラベル列の右端に ↑（送信）↓（受信）のトグルを持つ（SPEC-0002）。
+                             帯域は Upload / Download の欄で向きが決まるのでトグルなし。
+                             ラベル列の幅は "Delay" + トグル 2 個で決まる（Upload / Download のラベルはそれより短い） -->
+                        <DockPanel Grid.Row="0" LastChildFill="False">
+                            <CheckBox DockPanel.Dock="Left" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="BlockCheckBox"
+                                      Content="Block" IsChecked="{Binding BlockOn}"
+                                      ToolTip="Drops all packets and silently cuts the connection (the peer sees a timeout)" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0">
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="BlockOutToggle" Content="↑"
+                                          Foreground="{StaticResource OutBrush}" IsChecked="{Binding BlockOut}" ToolTip="Outbound (upload)" />
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="BlockInToggle" Content="↓"
+                                          Foreground="{StaticResource InBrush}" IsChecked="{Binding BlockIn}" ToolTip="Inbound (download)" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Grid.Row="1" LastChildFill="False">
+                            <CheckBox DockPanel.Dock="Left" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="ResetCheckBox"
+                                      Content="Reset" IsChecked="{Binding ResetOn}"
+                                      ToolTip="Sends RST to TCP connections to close them immediately. Has no effect on UDP. For traffic within this PC (127.0.0.1, etc.) RST does not work and it falls back to a silent cut, like Block. RST is sent when a packet in the selected direction is seen" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0">
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="ResetOutToggle" Content="↑"
+                                          Foreground="{StaticResource OutBrush}" IsChecked="{Binding ResetOut}" ToolTip="Outbound (upload)" />
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="ResetInToggle" Content="↓"
+                                          Foreground="{StaticResource InBrush}" IsChecked="{Binding ResetIn}" ToolTip="Inbound (download)" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel Grid.Row="2" LastChildFill="False">
+                            <CheckBox DockPanel.Dock="Left" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="DropCheckBox"
+                                      Content="Drop" IsChecked="{Binding DropOn}" ToolTip="Randomly drops the given percentage of packets" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0">
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="DropOutToggle" Content="↑"
+                                          Foreground="{StaticResource OutBrush}" IsChecked="{Binding DropOut}" ToolTip="Outbound (upload)" />
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="DropInToggle" Content="↓"
+                                          Foreground="{StaticResource InBrush}" IsChecked="{Binding DropIn}" ToolTip="Inbound (download)" />
+                            </StackPanel>
+                        </DockPanel>
+                        <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                            <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="DropText" Text="{Binding DropPercent}" />
+                            <TextBlock Style="{StaticResource UnitText}" Text="%" />
+                        </StackPanel>
+
+                        <DockPanel Grid.Row="3" LastChildFill="False">
+                            <CheckBox DockPanel.Dock="Left" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="DelayCheckBox"
+                                      Content="Delay" IsChecked="{Binding DelayOn}"
+                                      ToolTip="Adds a fixed delay plus ± jitter. Packet order is preserved within the same connection" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,0,0">
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="DelayOutToggle" Content="↑"
+                                          Foreground="{StaticResource OutBrush}" IsChecked="{Binding DelayOut}" ToolTip="Outbound (upload)" />
+                                <CheckBox Style="{StaticResource DirToggle}" AutomationProperties.AutomationId="DelayInToggle" Content="↓"
+                                          Foreground="{StaticResource InBrush}" IsChecked="{Binding DelayIn}" ToolTip="Inbound (download)" />
+                            </StackPanel>
+                        </DockPanel>
+                        <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                            <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="DelayText" Text="{Binding DelayMs}" />
+                            <TextBlock Style="{StaticResource UnitText}" Text="±" />
+                            <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="JitterText" Text="{Binding JitterMs}" Width="44" Margin="6,2,0,2" />
+                            <TextBlock Style="{StaticResource UnitText}" Text="ms" />
+                        </StackPanel>
+
+                        <CheckBox Grid.Row="4" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="UploadCheckBox"
+                                  Content="Upload" IsChecked="{Binding UploadOn}"
+                                  ToolTip="Limits the outbound rate. 0 stops outbound traffic. Uncheck for no limit" />
+                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                            <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="UploadText" Text="{Binding UploadValue}" />
+                            <ComboBox AutomationProperties.AutomationId="UploadUnit" SelectedIndex="{Binding UploadUnitIndex}" Width="75" Margin="6,2,0,2">
+                                <ComboBoxItem Content="KB/s" />
+                                <ComboBoxItem Content="MB/s" />
+                                <ComboBoxItem Content="Mbps" />
+                            </ComboBox>
+                        </StackPanel>
+
+                        <CheckBox Grid.Row="5" Style="{StaticResource RowCheck}" AutomationProperties.AutomationId="DownloadCheckBox"
+                                  Content="Download" IsChecked="{Binding DownloadOn}"
+                                  ToolTip="Limits the inbound rate. 0 stops inbound traffic. Uncheck for no limit" />
+                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="12,0,0,0">
+                            <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="DownloadText" Text="{Binding DownloadValue}" />
+                            <ComboBox AutomationProperties.AutomationId="DownloadUnit" SelectedIndex="{Binding DownloadUnitIndex}" Width="75" Margin="6,2,0,2">
+                                <ComboBoxItem Content="KB/s" />
+                                <ComboBoxItem Content="MB/s" />
+                                <ComboBoxItem Content="Mbps" />
+                            </ComboBox>
+                        </StackPanel>
+                    </Grid>
+
+                    <TextBlock AutomationProperties.AutomationId="ControlMessage" Text="{Binding Message}" TextWrapping="Wrap"
+                               Foreground="{StaticResource AccentBrush}" Margin="0,10,0,0" />
+
+                    <Separator Margin="0,14" />
+
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Timed block" VerticalAlignment="Center" Margin="0,0,12,0"
+                                   ToolTip="Blocks every controlled process for the given number of seconds, then restores it automatically" />
+                        <TextBox Style="{StaticResource ValueBox}" AutomationProperties.AutomationId="TimedBlockText" Text="{Binding TimedBlockSeconds}" Width="55" />
+                        <TextBlock Style="{StaticResource UnitText}" Text="s" Margin="6,0,10,0" />
+                        <Button AutomationProperties.AutomationId="TimedBlockButton" Content="Start" Command="{Binding TimedBlockCommand}" />
+                    </StackPanel>
+
+                    <Button AutomationProperties.AutomationId="ClearAllButton" Content="Clear all" Command="{Binding ClearAllCommand}"
+                            HorizontalAlignment="Left" Margin="0,14,0,0"
+                            ToolTip="Removes all control and timed blocks from every process and restores traffic" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <!-- 中央: 上=プロセス一覧、下=グラフ+接続一覧 -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="2*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="1.4*" />
+            </Grid.RowDefinitions>
+
+            <!-- 複数選択（Ctrl / Shift + クリック）。何も選ばなければ全体。Esc で選択を外す。選択はコードビハインドからビューモデルへ渡す -->
+            <DataGrid Grid.Row="0" x:Name="ProcessGrid" AutomationProperties.AutomationId="ProcessGrid" ItemsSource="{Binding Processes}"
+                      SelectionChanged="ProcessGrid_SelectionChanged" PreviewKeyDown="ProcessGrid_PreviewKeyDown"
+                      AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                      Background="#121212" RowBackground="#161616" AlternatingRowBackground="#1B1B1B"
+                      Foreground="{StaticResource TextBrush}" GridLinesVisibility="Horizontal"
+                      BorderThickness="0" CanUserSortColumns="True" SelectionMode="Extended" SelectionUnit="FullRow">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="PID" Binding="{Binding Pid}" Width="70" />
+                    <DataGridTextColumn Header="Process" Binding="{Binding Name}" Width="2*" />
+                    <DataGridTextColumn Header="↑/s" Binding="{Binding OutRateText}" SortMemberPath="OutRate" Width="90" />
+                    <DataGridTextColumn Header="↓/s" Binding="{Binding InRateText}" SortMemberPath="InRate" Width="90" />
+                    <DataGridTextColumn Header="↑Total" Binding="{Binding OutTotalText}" SortMemberPath="OutTotal" Width="90" />
+                    <DataGridTextColumn Header="↓Total" Binding="{Binding InTotalText}" SortMemberPath="InTotal" Width="90" />
+                    <DataGridTextColumn Header="Connections" Binding="{Binding ConnectionCount}" Width="95" />
+                    <DataGridTextColumn Header="Control" Binding="{Binding Control}" Width="*" />
+                </DataGrid.Columns>
+            </DataGrid>
+
+            <!-- 速度グラフ -->
+            <Border Grid.Row="1" Height="130" Background="#161616" Margin="0,1">
+                <Grid>
+                    <!-- 凡例を兼ねる: ↑ の値は送信の線と同じ色、↓ の値は受信の線と同じ色 -->
+                    <TextBlock Margin="8,4" VerticalAlignment="Top" Foreground="#AAA" ToolTip="{Binding GraphToolTip}">
+                        <Run Text="{Binding GraphTitle, Mode=OneWay}" />
+                        <Run Text="  " />
+                        <Run Text="{Binding GraphOutText, Mode=OneWay}" Foreground="{StaticResource OutBrush}" />
+                        <Run Text="  " />
+                        <Run Text="{Binding GraphInText, Mode=OneWay}" Foreground="{StaticResource InBrush}" />
+                    </TextBlock>
+                    <!-- 上りと下りは同じ尺度（ビューモデルが描かない枠で範囲をそろえている） -->
+                    <Path Data="{Binding OutGeometry}" Stroke="{StaticResource OutBrush}" StrokeThickness="1.5"
+                          Stretch="Fill" Margin="6,22,6,6" />
+                    <Path Data="{Binding InGeometry}" Stroke="{StaticResource InBrush}" StrokeThickness="1.5"
+                          Stretch="Fill" Margin="6,22,6,6" />
+                </Grid>
+            </Border>
+
+            <DockPanel Grid.Row="2">
+                <TextBlock DockPanel.Dock="Top" Text="Connections (selected processes)" Margin="8,6,0,2" Foreground="#AAA" />
+                <DataGrid ItemsSource="{Binding Connections}" AutoGenerateColumns="False" IsReadOnly="True"
+                          HeadersVisibility="Column" Background="#121212" RowBackground="#161616"
+                          AlternatingRowBackground="#1B1B1B" Foreground="{StaticResource TextBrush}"
+                          GridLinesVisibility="Horizontal" BorderThickness="0" SelectionMode="Single">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Process" Binding="{Binding ProcessName}" Width="140" />
+                        <DataGridTextColumn Header="Proto" Binding="{Binding Protocol}" Width="60" />
+                        <DataGridTextColumn Header="Local" Binding="{Binding Local}" Width="*" />
+                        <DataGridTextColumn Header="Remote" Binding="{Binding Remote}" Width="*" />
+                        <DataGridCheckBoxColumn Header="Loopback" Binding="{Binding Loopback, Mode=OneWay}" IsReadOnly="True" Width="70" />
+                        <DataGridTextColumn Header="↑" Binding="{Binding OutText}" SortMemberPath="OutBytes" Width="90" />
+                        <DataGridTextColumn Header="↓" Binding="{Binding InText}" SortMemberPath="InBytes" Width="90" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

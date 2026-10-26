@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>NetworkTrafficController</AssemblyName>
+    <RootNamespace>NetworkTrafficController.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <!-- publish の形（単一ファイル・圧縮）はここで決める。コマンドラインの -p: で渡すとグローバルプロパティとして Core にも効き、
+         暗黙の PackageReference（ILLink）が増えて packages.lock.json と食い違う（locked mode で publish できない） -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <StartupHookSupport>false</StartupHookSupport>
+    <!-- InvariantGlobalization は WPF のバインディングカルチャ（XmlLanguage en-US）解決を壊すため GUI では無効 -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- WPF の生成コードには XML ドキュメントを要求しない -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- アイコンは scripts/make-icon.py で生成する（手で編集しない） -->
+    <ApplicationIcon>..\..\assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ウィンドウのタイトルバーとタスクバーにも同じアイコンを出す -->
+    <Resource Include="..\..\assets\app.ico" Link="Assets\app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NetworkTrafficController.Core\NetworkTrafficController.Core.csproj" />
+  </ItemGroup>
+
+  <!-- WinDivert のネイティブ配布物は exe と同じフォルダに置く（ADR-0004） -->
+  <ItemGroup>
+    <None Include="..\..\native\WinDivert.dll" Link="WinDivert.dll" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\native\WinDivert64.sys" Link="WinDivert64.sys" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\..\native\LICENSE" Link="LICENSE.WinDivert" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- このツール自体のライセンス（MIT）。配布物に同梱する -->
+    <None Include="..\..\LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+
+</Project>
